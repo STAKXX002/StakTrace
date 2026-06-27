@@ -1,0 +1,8 @@
+# Rust build output
+/target
+
+# Environment / secrets (we'll use this later for any API keys)
+.env
+
+# VSCode settings (optional, remove if you want to share these)
+.vscode/
