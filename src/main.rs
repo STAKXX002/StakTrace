@@ -6,17 +6,25 @@ use colored::Colorize;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
+use clap::Parser;
+
+/// StakTrace — web security scanner
+#[derive(Parser)]
+#[command(name = "staktrace", version = "0.1", about = "Scans a webpage for dead links and security issues")]
+struct Cli {
+    /// URL to scan
+    url: String,
+
+    /// Use headless Chromium to render JS-heavy pages
+    #[arg(long)]
+    headless: bool,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        eprintln!("Usage: staktrace <url>");
-        std::process::exit(1);
-    }
-
-    let base_url = Url::parse(&args[1])
+    let base_url = Url::parse(&cli.url)
         .context("Invalid URL provided")?;
 
     println!("Scanning: {}\n", base_url);
@@ -33,11 +41,18 @@ async fn main() -> Result<()> {
 
     println!("Status: {}\n", response.status());
 
-    let body = response.text()
-        .await
-        .context("Failed to read response body")?;
+    // get the HTML — either via headless chromium or plain HTTP
+    let body = if cli.headless {
+        println!("{}", "Using headless Chromium to render page...".yellow());
+        fetch_with_headless(base_url.as_str())
+            .context("Headless fetch failed")?
+    } else {
+        response.text()
+            .await
+            .context("Failed to read response body")?
+    };
 
-    // --- security checks (all use the raw body, run before link checking) ---
+    // --- security checks ---
 
     let issues = check_mixed_content(&body, &base_url);
     if issues.is_empty() {
@@ -119,6 +134,33 @@ async fn main() -> Result<()> {
     println!("\n{} alive, {} dead", alive.to_string().green(), dead.to_string().red());
 
     Ok(())
+}
+
+fn fetch_with_headless(url: &str) -> Result<String> {
+    let output = std::process::Command::new("chromium-browser")
+        .args([
+            "--headless",
+            "--disable-gpu",
+            "--no-sandbox",
+            "--virtual-time-budget=5000",  // simulate 5 seconds of JS execution
+            "--dump-dom",
+            url,
+        ])
+        .output()
+        .context("Failed to launch chromium-browser")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Chromium exited with error: {}", stderr);
+    }
+
+    let html = String::from_utf8_lossy(&output.stdout).to_string();
+
+    if html.trim().is_empty() {
+        anyhow::bail!("Chromium returned empty output");
+    }
+
+    Ok(html)
 }
 
 async fn check_link(client: &Client, url: &str) -> Result<reqwest::StatusCode> {
