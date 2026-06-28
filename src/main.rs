@@ -41,6 +41,9 @@ async fn main() -> Result<()> {
 
     println!("Status: {}\n", response.status());
 
+    // save headers before consuming the response
+    let headers = response.headers().clone();
+
     // get the HTML — either via headless chromium or plain HTTP
     let body = if cli.headless {
         println!("{}", "Using headless Chromium to render page...".yellow());
@@ -80,6 +83,17 @@ async fn main() -> Result<()> {
     match check_security_txt(&client, &base_url).await {
         Some(contact) => println!("{}", contact.green()),
         None => println!("{}", "✗ No security.txt found".yellow()),
+    }
+    println!();
+
+    let missing_headers = check_security_headers(&headers);
+    if missing_headers.is_empty() {
+        println!("{}", "✓ All security headers present".green());
+    } else {
+        println!("{}", "✗ Missing security headers:".red());
+        for (header, reason) in &missing_headers {
+            println!("    {} — {}", header.yellow(), reason);
+        }
     }
     println!();
 
@@ -142,7 +156,7 @@ fn fetch_with_headless(url: &str) -> Result<String> {
             "--headless",
             "--disable-gpu",
             "--no-sandbox",
-            "--virtual-time-budget=5000",  // simulate 5 seconds of JS execution
+            "--virtual-time-budget=5000",
             "--dump-dom",
             url,
         ])
@@ -302,4 +316,20 @@ async fn check_security_txt(client: &Client, base: &Url) -> Option<String> {
     }
 
     None
+}
+
+fn check_security_headers(headers: &reqwest::header::HeaderMap) -> Vec<(&'static str, &'static str)> {
+    let required = vec![
+        ("strict-transport-security", "Missing HSTS — browser may allow HTTP downgrade attacks"),
+        ("content-security-policy",   "Missing CSP — XSS attacks can run arbitrary scripts"),
+        ("x-frame-options",           "Missing X-Frame-Options — site can be clickjacked via iframe"),
+        ("x-content-type-options",    "Missing X-Content-Type-Options — browser may misinterpret file types"),
+        ("referrer-policy",           "Missing Referrer-Policy — URLs leak to third parties"),
+        ("permissions-policy",        "Missing Permissions-Policy — camera/mic/location not restricted"),
+    ];
+
+    required
+        .into_iter()
+        .filter(|(header, _)| !headers.contains_key(*header))
+        .collect()
 }
