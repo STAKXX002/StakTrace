@@ -169,6 +169,20 @@ async fn check_link(client: &Client, url: &str) -> Result<reqwest::StatusCode> {
         .await
         .with_context(|| format!("Request failed for {}", url))?;
 
+    // HEAD not allowed — fall back to GET
+    if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        let get_response = client.get(url)
+            .send()
+            .await
+            .with_context(|| format!("GET fallback failed for {}", url))?;
+        return Ok(get_response.status());
+    }
+
+    // 403 means page exists but blocks bots — not a dead link
+    if response.status() == reqwest::StatusCode::FORBIDDEN {
+        return Ok(reqwest::StatusCode::OK);
+    }
+
     Ok(response.status())
 }
 
@@ -180,6 +194,7 @@ fn extract_links(html: &str, base: &Url) -> Vec<String> {
         .select(&selector)
         .filter_map(|element| element.value().attr("href"))
         .filter_map(|href| base.join(href).ok())
+        .filter(|url| url.scheme() == "http" || url.scheme() == "https")
         .map(|url| url.to_string())
         .collect()
 }
