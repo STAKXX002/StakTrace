@@ -80,7 +80,8 @@ async fn main() -> Result<()> {
     println!();
 
     print!("Checking security.txt... ");
-    match check_security_txt(&client, &base_url).await {
+    let security_txt = check_security_txt(&client, &base_url).await;
+    match &security_txt {
         Some(contact) => println!("{}", contact.green()),
         None => println!("{}", "✗ No security.txt found".yellow()),
     }
@@ -146,6 +147,16 @@ async fn main() -> Result<()> {
     }
 
     println!("\n{} alive, {} dead", alive.to_string().green(), dead.to_string().red());
+
+    print_summary(
+        &base_url,
+        &issues,
+        &leaks,
+        &security_txt,
+        &missing_headers,
+        alive,
+        dead,
+    );
 
     Ok(())
 }
@@ -332,4 +343,63 @@ fn check_security_headers(headers: &reqwest::header::HeaderMap) -> Vec<(&'static
         .into_iter()
         .filter(|(header, _)| !headers.contains_key(*header))
         .collect()
+}
+
+fn print_summary(
+    url: &Url,
+    mixed: &[String],
+    leaks: &[String],
+    security_txt: &Option<String>,
+    missing_headers: &[(&'static str, &'static str)],
+    alive: usize,
+    dead: usize,
+) {
+    println!("{}", "═".repeat(60).cyan());
+    println!("{}", "  StakTrace Report".cyan().bold());
+    println!("{}", "═".repeat(60).cyan());
+    println!("  Target : {}", url);
+    println!("  Links  : {} alive, {} dead", alive.to_string().green(), dead.to_string().red());
+    println!();
+
+    println!("  {}", "Security Checks".bold());
+    println!("  {}", "─".repeat(40));
+
+    // security.txt
+    match security_txt {
+        Some(contact) => println!("  {} security.txt — {}", "✓".green(), contact),
+        None =>          println!("  {} security.txt — not found", "✗".yellow()),
+    }
+
+    // mixed content
+    if mixed.is_empty() {
+        println!("  {} No mixed content", "✓".green());
+    } else {
+        println!("  {} Mixed content ({} found):", "✗".red(), mixed.len());
+        for item in mixed {
+            println!("      {}", item.yellow());
+        }
+    }
+
+    // internal leaks
+    if leaks.is_empty() {
+        println!("  {} No internal URL leaks", "✓".green());
+    } else {
+        println!("  {} Internal leaks ({} found):", "✗".red(), leaks.len());
+        for item in leaks {
+            println!("      {}", item.yellow());
+        }
+    }
+
+    // security headers
+    if missing_headers.is_empty() {
+        println!("  {} All security headers present", "✓".green());
+    } else {
+        println!("  {} Missing headers ({} found):", "✗".red(), missing_headers.len());
+        for (header, _) in missing_headers {
+            println!("      {}", header.yellow());
+        }
+    }
+
+    println!();
+    println!("{}", "═".repeat(60).cyan());
 }
